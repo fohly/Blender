@@ -55,6 +55,7 @@ def blend_to_md5():
     import time
     scene = bpy.context.scene
     ROUND = 4
+    useRound = True
 
     def floatseq2str(seq):
         return "".join([str(round(val, ROUND)) for val in seq]).encode('ASCII')
@@ -65,6 +66,8 @@ def blend_to_md5():
     def coords2str(seq, attr):
         return floatseq2str(axis for vertex in seq for axis in getattr(vertex, attr))
 
+    #returns an attribute from items in a sequence as a numpy array
+    #faster than list comprehension
     def seq2numpyarray(seq, attribute, dtype, length_multiplier):
         data = np.empty(len(seq) * length_multiplier, dtype=dtype)
         seq.foreach_get(attribute, data)
@@ -117,19 +120,19 @@ def blend_to_md5():
         #vertex groups
         #TODO
 
-    #rotates each loop in the list, so the vertex with the lowest index is first
+    #rotates vertices inside a polygon, so that the vertex with the lowest index is first
     #then sorts the polys based on a hash based on its vertex indices
     #returns a tuple containting:
-    # - an indexing from new to old loop index
-    # - an indexing from new to old polygon index
-    def rotate_sort_loops(loops, polys, polys_len):
+    # - an indexing from new to old loop index (to remap per loop data, like uvs)
+    # - an indexing from new to old polygon index (can be used to remap per face data)
+    def rotate_sort_polys(loops, polys, polys_len):
         loops = loops.tolist() # we don't use numpy stuff in this function, and lists provide faster indexing
         polys = polys.tolist()
         polys_len = polys_len.tolist()
         
         # rotate verts inside poly and compute hash
         loops_index = [0] * len(loops)
-        loops_hash = [0] * len(polys) # hopefully unique value per poly
+        polys_hash = [0] * len(polys) # hopefully unique value per poly
         for ii in range(len(polys)):
             start_idx = polys[ii]
             length = polys_len[ii]
@@ -139,28 +142,28 @@ def blend_to_md5():
                 if loops[jj + start_idx] < min_vertex:
                     min_vertex = loops[jj + start_idx]
                     min_idx = jj
-            loop_hash = 0
+            poly_hash = 14695981039346656037
             for jj in range(length):
                 idx = start_idx + ((jj + min_idx) % length)
                 loops_index[jj + start_idx] = idx
-                loop_hash += loops[idx] * (jj+1) * 42424243 # multiply by some random prime number, to get a nice hash
-            loops_hash[ii] = loop_hash
+                poly_hash = (poly_hash * 1099511628211) ^ loops[idx] # Fowler–Noll–Vo hash, except that we work per integer, not per byte
+            polys_hash[ii] = poly_hash
         
-        loop_reorder = np.argsort(loops_hash, kind='mergesort') # mergesort, even though we should not get collisions
+        poly_reorder = np.argsort(polys_hash, kind='mergesort') # mergesort, even though we should not get collisions
         
         # reorder the polygons based on hash
         
-        loops_index_2 = [0] * len(loops)
+        loops_index_sorted = [0] * len(loops)
         next_start = 0
         for ii in range(len(polys)):
-            poly_idx = loop_reorder[ii]
+            poly_idx = poly_reorder[ii]
             loop_start = polys[poly_idx]
             length = polys_len[poly_idx]
             for jj in range(length):
-                loops_index_2[next_start + jj] = loops_index[loop_start + jj]
+                loops_index_sorted[next_start + jj] = loops_index[loop_start + jj]
             next_start += length
         
-        return (loops_index_2, loop_reorder)
+        return (loops_index_sorted, poly_reorder)
     
     #hashes the mesh data
     #first sorts the data to be deterministic
@@ -170,6 +173,8 @@ def blend_to_md5():
         timer = [time.time()]
         
         verts_raw = seq2numpyarray(mesh.vertices, 'co', np.float32, 3)
+        if (useRound):
+                np.around(verts_raw, decimals=ROUND, out=verts_raw)
         time_help("verts_raw", timer)
         verts = verts_raw.view(dtype=[('x', np.float32), ('y', np.float32), ('z', np.float32)])
         time_help("verts", timer)
@@ -181,9 +186,9 @@ def blend_to_md5():
         verts_sorted = verts[verts_index]
         time_help("verts_sorted", timer)
         
-        #print(verts)
-        #print(verts_sorted)
-        #print(verts_index)
+        print(verts)
+        print(verts_sorted)
+        print(verts_index)
         
         polys = seq2numpyarray(mesh.polygons, 'loop_start', np.uint32, 1)
         polys_len = seq2numpyarray(mesh.polygons, 'loop_total', np.uint32, 1)
@@ -191,21 +196,41 @@ def blend_to_md5():
         
 
         # prepare loop data
+        # contains the vertex index of every polygon corner
         loops = seq2numpyarray(mesh.loops, 'vertex_index', np.uint32, 1) # vertex indices per loop
         time_help("loops", timer)
         
-        #print(loops)
+        print(loops)
         
         loops2 = verts_remapping[loops] # remap vertex indices of loops
         time_help("loops2", timer)
         
-        #print(loops2)
+        print(loops2)
         
-        (loops_index, poly_index) = rotate_sort_loops(loops2, polys, polys_len)
+        (loops_index, polys_index) = rotate_sort_polys(loops2, polys, polys_len)
         loops_sorted = loops2[loops_index]
         time_help("loops_sorted", timer)
-        #print(loops_sorted)
+        print(loops_sorted)
 
+        #TODO edges
+        
+        #uvs
+        
+        for uv in mesh.uv_layers:
+            uvs_raw = seq2numpyarray(uv.data, 'uv', np.float32, 2)
+            if (useRound):
+                np.around(uvs_raw, decimals=ROUND, out=uvs_raw)
+            time_help("uvs_raw", timer)
+            uvs = uvs_raw.view(dtype=[('x', np.float32), ('y', np.float32)])
+            
+            uvs_sorted = uvs[loops_index] # remap uv into new order
+            time_help("uvs_sorted", timer)
+            
+            if (sys.byteorder != 'little'):
+                uvs_sorted.byteswap(True)
+            hash_update(uvs_sorted)
+            time_help("hash_update: uvs_sorted", timer)
+        
         # do hashing
         if (sys.byteorder != 'little'):
             verts_sorted.byteswap(True)
