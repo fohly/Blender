@@ -51,14 +51,61 @@ def clear_startup_blend():
 
 def blend_to_md5():
     import bpy
+    import numpy as np
     scene = bpy.context.scene
     ROUND = 4
 
+    def floatseq2str(seq):
+        return "".join([str(round(val, ROUND)) for val in seq]).encode('ASCII')
+
     def matrix2str(matrix):
-        return "".join([str(round(axis, ROUND)) for vector in matrix for axis in vector]).encode('ASCII')
+        return floatseq2str(axis for vector in matrix for axis in vector)
 
     def coords2str(seq, attr):
-        return "".join([str(round(axis, ROUND)) for vertex in seq for axis in getattr(vertex, attr)]).encode('ASCII')
+        return floatseq2str(axis for vertex in seq for axis in getattr(vertex, attr))
+
+    def hash_sequence(hash_update, seq, attribute, dtype, length_multiplier):
+        data = np.empty(len(seq) * length_multiplier, dtype=dtype)
+        seq.foreach_get(attribute, data)
+        if (sys.byteorder != 'little'):
+            data.byteswap(True)
+        hash_update(data)
+        del data
+
+    #hashes the mesh data
+    #supported:
+    # vertices, faces, edges
+    # uvs, vertex colors
+    #not supported:
+    # shapekeys, ...?
+    # vertex groups (don't know how to access efficiently)
+    # material indices
+    #
+    # also, the hash is order-dependent, could be resolved by sorting the data first and remapping indices
+    def mesh_hash(hash_update, mesh):
+        #vertex coordinates
+        hash_sequence(hash_update, mesh.vertices, 'co', np.float32, 3)
+
+        #faces
+        #we only check the loops, and the loop indices in the faces
+        hash_sequence(hash_update, mesh.polygons, 'loop_start', np.uint32, 1)
+        hash_sequence(hash_update, mesh.polygons, 'loop_total', np.uint32, 1)
+        hash_sequence(hash_update, mesh.loops, 'vertex_index', np.uint32, 1)
+
+        #edges
+        hash_sequence(hash_update, mesh.edges, 'vertices', np.uint32, 2)
+
+        #vertex colors
+        for vcolor in mesh.vertex_colors:
+            hash_sequence(hash_update, vcolor.data, 'vertices', np.float32, 4) # vertex colors have 4 components. getting as 8 bit integer will not work
+
+        #uvs
+        for uv in mesh.uv_layers:
+            hash_sequence(hash_update, uv.data, 'uv', np.float32, 2)
+
+        #vertex groups
+        #TODO
+
 
     import hashlib
 
@@ -70,7 +117,7 @@ def blend_to_md5():
         data = obj.data
 
         if type(data) == bpy.types.Mesh:
-            md5_update(coords2str(data.vertices, "co"))
+            mesh_hash(md5_update, data)
         elif type(data) == bpy.types.Curve:
             for spline in data.splines:
                 md5_update(coords2str(spline.bezier_points, "co"))
