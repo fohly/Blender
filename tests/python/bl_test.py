@@ -163,7 +163,9 @@ def blend_to_md5():
     #hashes the mesh data
     #first sorts the data to be deterministic
     #may have non-deterministic results with double vertices / double faces / etc
-    def mesh_hash_sorted(hash_update, mesh):
+    def mesh_hash_sorted(hash_update, obj):
+        mesh = obj.data
+
         verts_raw = seq2numpyarray(mesh.vertices, 'co', np.float32, 3)
         if (useRound):
                 np.around(verts_raw, decimals=ROUND, out=verts_raw)
@@ -201,6 +203,32 @@ def blend_to_md5():
                 uvs_sorted.byteswap(True)
             hash_update(uvs_sorted)
 
+        # vertex groups
+        # not really happy with this, but I don't know a more efficient way to get all weights
+        vgroup_weights = [[0.0] * len(mesh.vertices) for i in obj.vertex_groups] #empty array for all weights
+
+        for vert in mesh.vertices:
+            for weight in vert.groups:
+                vgroup_weights[weight.index][vert.index] = weight.weight
+
+        vgroup_names = [group.name for group in obj.vertex_groups]
+        vgroup_map = argsort(vgroup_names)
+        for ii in vgroup_map:
+            weights_sorted = np.array(vgroup_weights[ii], dtype=np.float32)[verts_map]
+            if (sys.byteorder != 'little'):
+                weights_sorted.byteswap(True)
+            hash_update(weights_sorted)
+
+        vcolor_names = [color.name for color in mesh.vertex_colors]
+        vcolor_map = argsort(vcolor_names)
+        for ii in vcolor_map:
+            vcolors_raw = seq2numpyarray(mesh.vertex_colors[ii].data, 'color', np.float32, 4) # vertex colors have 4 components. getting as 8 bit integer will not work
+            vcolors = vcolors_raw.view(dtype=[('r', np.float32), ('g', np.float32), ('b', np.float32), ('a', np.float32)])
+            vcolors_sorted = vcolors[loops_map]
+            if (sys.byteorder != 'little'):
+                vcolors_sorted.byteswap(True)
+            hash_update(vcolors_sorted)
+
         # do hashing
         if (sys.byteorder != 'little'):
             verts_sorted.byteswap(True)
@@ -222,7 +250,7 @@ def blend_to_md5():
 
         if type(data) == bpy.types.Mesh:
             #mesh_hash(md5_update, data)
-            mesh_hash_sorted(md5_update, data)
+            mesh_hash_sorted(md5_update, obj)
         elif type(data) == bpy.types.Curve:
             for spline in data.splines:
                 md5_update(coords2str(spline.bezier_points, "co"))
