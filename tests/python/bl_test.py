@@ -55,7 +55,7 @@ def blend_to_md5():
     import time
     scene = bpy.context.scene
     ROUND = 4
-    useRound = True
+    useRound = False
 
     def floatseq2str(seq):
         return "".join([str(round(val, ROUND)) for val in seq]).encode('ASCII')
@@ -80,11 +80,6 @@ def blend_to_md5():
             data.byteswap(True)
         hash_update(data)
         del data
-        
-    def time_help(str, timer):
-        t = time.time()
-        print(str, t-timer[0])
-        timer[0] = t
 
     #hashes the mesh data
     #supported:
@@ -111,7 +106,7 @@ def blend_to_md5():
 
         #vertex colors
         for vcolor in mesh.vertex_colors:
-            hash_sequence(hash_update, vcolor.data, 'vertices', np.float32, 4) # vertex colors have 4 components. getting as 8 bit integer will not work
+            hash_sequence(hash_update, vcolor.data, 'color', np.float32, 4) # vertex colors have 4 components. getting as 8 bit integer will not work
 
         #uvs
         for uv in mesh.uv_layers:
@@ -123,15 +118,15 @@ def blend_to_md5():
     #rotates vertices inside a polygon, so that the vertex with the lowest index is first
     #then sorts the polys based on a hash based on its vertex indices
     #returns a tuple containting:
-    # - an indexing from new to old loop index (to remap per loop data, like uvs)
-    # - an indexing from new to old polygon index (can be used to remap per face data)
+    # - a mapping from new to old loop index (to remap per loop data, like uvs)
+    # - a mapping from new to old polygon index (can be used to remap per face data)
     def rotate_sort_polys(loops, polys, polys_len):
         loops = loops.tolist() # we don't use numpy stuff in this function, and lists provide faster indexing
         polys = polys.tolist()
         polys_len = polys_len.tolist()
-        
+
         # rotate verts inside poly and compute hash
-        loops_index = [0] * len(loops)
+        loops_map = [0] * len(loops)
         polys_hash = [0] * len(polys) # hopefully unique value per poly
         for ii in range(len(polys)):
             start_idx = polys[ii]
@@ -145,92 +140,67 @@ def blend_to_md5():
             poly_hash = 14695981039346656037
             for jj in range(length):
                 idx = start_idx + ((jj + min_idx) % length)
-                loops_index[jj + start_idx] = idx
+                loops_map[jj + start_idx] = idx
                 poly_hash = (poly_hash * 1099511628211) ^ loops[idx] # Fowler–Noll–Vo hash, except that we work per integer, not per byte
             polys_hash[ii] = poly_hash
-        
-        poly_reorder = np.argsort(polys_hash, kind='mergesort') # mergesort, even though we should not get collisions
-        
+
+        polys_map = np.argsort(polys_hash, kind='mergesort') # mergesort, even though we should not get collisions
+
         # reorder the polygons based on hash
-        
-        loops_index_sorted = [0] * len(loops)
+
+        loops_sorted_map = [0] * len(loops)
         next_start = 0
         for ii in range(len(polys)):
-            poly_idx = poly_reorder[ii]
+            poly_idx = polys_map[ii]
             loop_start = polys[poly_idx]
             length = polys_len[poly_idx]
             for jj in range(length):
-                loops_index_sorted[next_start + jj] = loops_index[loop_start + jj]
+                loops_sorted_map[next_start + jj] = loops_map[loop_start + jj]
             next_start += length
-        
-        return (loops_index_sorted, poly_reorder)
-    
+
+        return (loops_sorted_map, polys_map)
+
     #hashes the mesh data
     #first sorts the data to be deterministic
+    #may have non-deterministic results with double vertices / double faces / etc
     def mesh_hash_sorted(hash_update, mesh):
-        # prepare vertex data
-
-        timer = [time.time()]
-        
         verts_raw = seq2numpyarray(mesh.vertices, 'co', np.float32, 3)
         if (useRound):
                 np.around(verts_raw, decimals=ROUND, out=verts_raw)
-        time_help("verts_raw", timer)
+
         verts = verts_raw.view(dtype=[('x', np.float32), ('y', np.float32), ('z', np.float32)])
-        time_help("verts", timer)
-        verts_index = np.argsort(verts, kind='mergesort', order=['x', 'y', 'z']) # mergesort, because it is stable (quicksort is based on random numbers usually)
-        #verts_index maps from new index to old index. so verts_index[0] is the index of the "lowest" vertex
-        time_help("verts_index", timer)
-        verts_remapping = np.argsort(verts_index) # allows finding the new index of a vertex based on the old one
-        time_help("verts_remapping", timer)
-        verts_sorted = verts[verts_index]
-        time_help("verts_sorted", timer)
-        
-        print(verts)
-        print(verts_sorted)
-        print(verts_index)
-        
+        verts_map = np.argsort(verts, kind='mergesort', order=['x', 'y', 'z']) # mergesort, because it is stable (quicksort is based on random numbers usually)
+        #verts_map maps from new index to old index. so verts_map[0] is the index inside verts of the "lowest" vertex
+
+        verts_map_inv = np.argsort(verts_map) # maps from old to new vertex index
+        verts_sorted = verts[verts_map]
+
         polys = seq2numpyarray(mesh.polygons, 'loop_start', np.uint32, 1)
         polys_len = seq2numpyarray(mesh.polygons, 'loop_total', np.uint32, 1)
-        
-        
 
         # prepare loop data
         # contains the vertex index of every polygon corner
         loops = seq2numpyarray(mesh.loops, 'vertex_index', np.uint32, 1) # vertex indices per loop
-        time_help("loops", timer)
-        
-        print(loops)
-        
-        loops2 = verts_remapping[loops] # remap vertex indices of loops
-        time_help("loops2", timer)
-        
-        print(loops2)
-        
-        (loops_index, polys_index) = rotate_sort_polys(loops2, polys, polys_len)
-        loops_sorted = loops2[loops_index]
-        time_help("loops_sorted", timer)
-        print(loops_sorted)
+        loops = verts_map_inv[loops] # remap vertex indices of loops
+
+        (loops_map, polys_map) = rotate_sort_polys(loops, polys, polys_len)
+        loops_sorted = loops[loops_map]
 
         #TODO edges
-        
-        #uvs
-        
+
+        #uvs, TODO order of uv layers
         for uv in mesh.uv_layers:
             uvs_raw = seq2numpyarray(uv.data, 'uv', np.float32, 2)
             if (useRound):
                 np.around(uvs_raw, decimals=ROUND, out=uvs_raw)
-            time_help("uvs_raw", timer)
             uvs = uvs_raw.view(dtype=[('x', np.float32), ('y', np.float32)])
-            
-            uvs_sorted = uvs[loops_index] # remap uv into new order
-            time_help("uvs_sorted", timer)
-            
+
+            uvs_sorted = uvs[loops_map] # remap uv into new order
+
             if (sys.byteorder != 'little'):
                 uvs_sorted.byteswap(True)
             hash_update(uvs_sorted)
-            time_help("hash_update: uvs_sorted", timer)
-        
+
         # do hashing
         if (sys.byteorder != 'little'):
             verts_sorted.byteswap(True)
@@ -239,7 +209,6 @@ def blend_to_md5():
         hash_update(verts_sorted)
         hash_update(loops_sorted)
         # we don't hash polys directly, but since we hash the loops, that's already in there implicitly
-        time_help("hash_update", timer)
 
 
     import hashlib
