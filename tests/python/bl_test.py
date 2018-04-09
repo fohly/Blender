@@ -117,7 +117,7 @@ def blend_to_md5():
 
     #rotates vertices inside a polygon, so that the vertex with the lowest index is first
     #then sorts the polys based on a hash based on its vertex indices
-    #returns a tuple containting:
+    #returns a tuple containing:
     # - a mapping from new to old loop index (to remap per loop data, like uvs)
     # - a mapping from new to old polygon index (can be used to remap per face data)
     def rotate_sort_polys(loops, polys, polys_len):
@@ -160,6 +160,14 @@ def blend_to_md5():
 
         return (loops_sorted_map, polys_map)
 
+    def hash_mapped(hash_update, data, mapping, reinterpret_type):
+        data2 = data.view(dtype=reinterpret_type)
+        data_sorted = data[mapping]
+        if (sys.byteorder != 'little'):
+            data_sorted.byteswap(True)
+        hash_update(data_sorted)
+        del data_sorted
+
     #hashes the mesh data
     #first sorts the data to be deterministic
     #may have non-deterministic results with double vertices / double faces / etc
@@ -191,17 +199,20 @@ def blend_to_md5():
         #TODO edges
 
         #uvs, TODO order of uv layers
-        for uv in mesh.uv_layers:
-            uvs_raw = seq2numpyarray(uv.data, 'uv', np.float32, 2)
+        uv_names = [uv.name for uv in mesh.uv_layers]
+        uv_map = np.argsort(uv_names)
+        for ii in uv_map:
+            uvs_raw = seq2numpyarray(mesh.uv_layers[ii].data, 'uv', np.float32, 2)
             if (useRound):
                 np.around(uvs_raw, decimals=ROUND, out=uvs_raw)
-            uvs = uvs_raw.view(dtype=[('x', np.float32), ('y', np.float32)])
+            hash_mapped(hash_update, uvs_raw, loops_map, [('x', np.float32), ('y', np.float32)])
+            #uvs = uvs_raw.view(dtype=[('x', np.float32), ('y', np.float32)])
 
-            uvs_sorted = uvs[loops_map] # remap uv into new order
+            #uvs_sorted = uvs[loops_map] # remap uv into new order
 
-            if (sys.byteorder != 'little'):
-                uvs_sorted.byteswap(True)
-            hash_update(uvs_sorted)
+            #if (sys.byteorder != 'little'):
+            #    uvs_sorted.byteswap(True)
+            #hash_update(uvs_sorted)
 
         # vertex groups
         # not really happy with this, but I don't know a more efficient way to get all weights
@@ -212,7 +223,7 @@ def blend_to_md5():
                 vgroup_weights[weight.index][vert.index] = weight.weight
 
         vgroup_names = [group.name for group in obj.vertex_groups]
-        vgroup_map = argsort(vgroup_names)
+        vgroup_map = np.argsort(vgroup_names)
         for ii in vgroup_map:
             weights_sorted = np.array(vgroup_weights[ii], dtype=np.float32)[verts_map]
             if (sys.byteorder != 'little'):
@@ -220,14 +231,15 @@ def blend_to_md5():
             hash_update(weights_sorted)
 
         vcolor_names = [color.name for color in mesh.vertex_colors]
-        vcolor_map = argsort(vcolor_names)
+        vcolor_map = np.argsort(vcolor_names)
         for ii in vcolor_map:
             vcolors_raw = seq2numpyarray(mesh.vertex_colors[ii].data, 'color', np.float32, 4) # vertex colors have 4 components. getting as 8 bit integer will not work
-            vcolors = vcolors_raw.view(dtype=[('r', np.float32), ('g', np.float32), ('b', np.float32), ('a', np.float32)])
-            vcolors_sorted = vcolors[loops_map]
-            if (sys.byteorder != 'little'):
-                vcolors_sorted.byteswap(True)
-            hash_update(vcolors_sorted)
+            hash_mapped(hash_update, vcolors_raw, loops_map, [('r', np.float32), ('g', np.float32), ('b', np.float32), ('a', np.float32)])
+            #vcolors = vcolors_raw.view(dtype=[('r', np.float32), ('g', np.float32), ('b', np.float32), ('a', np.float32)])
+            #vcolors_sorted = vcolors[loops_map]
+            #if (sys.byteorder != 'little'):
+            #    vcolors_sorted.byteswap(True)
+            #hash_update(vcolors_sorted)
 
         # do hashing
         if (sys.byteorder != 'little'):
