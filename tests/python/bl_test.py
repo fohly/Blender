@@ -191,14 +191,25 @@ def blend_to_md5():
         # prepare loop data
         # contains the vertex index of every polygon corner
         loops = seq2numpyarray(mesh.loops, 'vertex_index', np.uint32, 1) # vertex indices per loop
-        loops = verts_map_inv[loops] # remap vertex indices of loops
+        loops = np.array(verts_map_inv[loops], dtype=np.uint32) # remap vertex indices of loops
 
         (loops_map, polys_map) = rotate_sort_polys(loops, polys, polys_len)
         loops_sorted = loops[loops_map]
 
-        #TODO edges
+        #edges
+        edges_raw = seq2numpyarray(mesh.edges, 'vertices', np.uint32, 2)
+        edges = np.array(verts_map_inv[edges_raw], dtype=np.uint32) # remap vertex indices
+        edges_a = edges[0::2] # split into first and second vertex per edge
+        edges_b = edges[1::2]
+        edges_flag = edges_a < edges_b
+        edges_max = np.choose(edges_flag, (edges_a, edges_b))
+        edges_min = np.choose(edges_flag, (edges_b, edges_a))
+        np.concatenate((edges_min, edges_max), out=edges)
+        edges = edges.reshape(2, -1).transpose().reshape(-1) # put edge vertices in pairs again and flatten
+        edges = edges.view(dtype=[('a', np.uint32), ('b', np.uint32)])
+        edges_sorted = np.sort(edges, order=['a', 'b'])
 
-        #uvs, TODO order of uv layers
+        #uvs
         uv_names = [uv.name for uv in mesh.uv_layers]
         uv_map = np.argsort(uv_names)
         for ii in uv_map:
@@ -245,9 +256,11 @@ def blend_to_md5():
         if (sys.byteorder != 'little'):
             verts_sorted.byteswap(True)
             loops_sorted.byteswap(True)
+            edges_sorted.byteswap(True)
 
         hash_update(verts_sorted)
         hash_update(loops_sorted)
+        hash_update(edges_sorted)
         # we don't hash polys directly, but since we hash the loops, that's already in there implicitly
 
 
