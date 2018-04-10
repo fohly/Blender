@@ -162,7 +162,7 @@ def blend_to_md5():
 
     def hash_mapped(hash_update, data, mapping, reinterpret_type):
         data2 = data.view(dtype=reinterpret_type)
-        data_sorted = data[mapping]
+        data_sorted = data2[mapping]
         if (sys.byteorder != 'little'):
             data_sorted.byteswap(True)
         hash_update(data_sorted)
