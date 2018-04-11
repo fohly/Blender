@@ -171,6 +171,11 @@ def blend_to_md5():
     #hashes the mesh data
     #first sorts the data to be deterministic
     #may have non-deterministic results with double vertices / double faces / etc
+    #hashes:
+    # - vertices - polys - edges
+    # - vgroups - vcolors - uvs
+    # - sharp edges
+    # - material assignments
     def mesh_hash_sorted(hash_update, obj):
         mesh = obj.data
 
@@ -207,23 +212,18 @@ def blend_to_md5():
         np.concatenate((edges_min, edges_max), out=edges)
         edges = edges.reshape(2, -1).transpose().reshape(-1) # put edge vertices in pairs again and flatten
         edges = edges.view(dtype=[('a', np.uint32), ('b', np.uint32)])
-        edges_sorted = np.sort(edges, order=['a', 'b'])
+        edges_map = np.argsort(edges, order=['a', 'b'])
+        edges_sorted = edges[edges_map]
 
         #uvs
         uv_names = [uv.name for uv in mesh.uv_layers]
         uv_map = np.argsort(uv_names)
         for ii in uv_map:
+            hash_update(uv_names[ii].encode(encoding='utf-8'))
             uvs_raw = seq2numpyarray(mesh.uv_layers[ii].data, 'uv', np.float32, 2)
             if (useRound):
                 np.around(uvs_raw, decimals=ROUND, out=uvs_raw)
             hash_mapped(hash_update, uvs_raw, loops_map, [('x', np.float32), ('y', np.float32)])
-            #uvs = uvs_raw.view(dtype=[('x', np.float32), ('y', np.float32)])
-
-            #uvs_sorted = uvs[loops_map] # remap uv into new order
-
-            #if (sys.byteorder != 'little'):
-            #    uvs_sorted.byteswap(True)
-            #hash_update(uvs_sorted)
 
         # vertex groups
         # not really happy with this, but I don't know a more efficient way to get all weights
@@ -236,6 +236,7 @@ def blend_to_md5():
         vgroup_names = [group.name for group in obj.vertex_groups]
         vgroup_map = np.argsort(vgroup_names)
         for ii in vgroup_map:
+            hash_update(vgroup_names[ii].encode(encoding='utf-8'))
             weights_sorted = np.array(vgroup_weights[ii], dtype=np.float32)[verts_map]
             if (sys.byteorder != 'little'):
                 weights_sorted.byteswap(True)
@@ -244,25 +245,36 @@ def blend_to_md5():
         vcolor_names = [color.name for color in mesh.vertex_colors]
         vcolor_map = np.argsort(vcolor_names)
         for ii in vcolor_map:
+            hash_update(vcolor_names[ii].encode(encoding='utf-8'))
             vcolors_raw = seq2numpyarray(mesh.vertex_colors[ii].data, 'color', np.float32, 4) # vertex colors have 4 components. getting as 8 bit integer will not work
             hash_mapped(hash_update, vcolors_raw, loops_map, [('r', np.float32), ('g', np.float32), ('b', np.float32), ('a', np.float32)])
-            #vcolors = vcolors_raw.view(dtype=[('r', np.float32), ('g', np.float32), ('b', np.float32), ('a', np.float32)])
-            #vcolors_sorted = vcolors[loops_map]
-            #if (sys.byteorder != 'little'):
-            #    vcolors_sorted.byteswap(True)
-            #hash_update(vcolors_sorted)
+
+        # sharp edges
+        edges_sharp_raw = seq2numpyarray(mesh.edges, 'use_edge_sharp', np.uint8, 1)
+        edges_sharp_sorted = edges_sharp_raw[edges_map]
+
+        # materials
+        # materials are hashed based on original material index, names are not sorted,
+        # because they are global names and depending on the content of the scene,
+        # a name may not be available and has to be changed
+
+        materials_raw = seq2numpyarray(mesh.polygons, 'material_index', np.uint32, 1)
+        materials_sorted = materials_raw[polys_map] # reorder polygons
+
 
         # do hashing
         if (sys.byteorder != 'little'):
             verts_sorted.byteswap(True)
             loops_sorted.byteswap(True)
             edges_sorted.byteswap(True)
+            #edges_sharp_sorted.byteswap(True) # 8 bit type
+            materials_sorted.byteswap(True)
 
         hash_update(verts_sorted)
-        hash_update(loops_sorted)
+        hash_update(loops_sorted) # we don't hash polys directly, but since we hash the loops, that's already in there implicitly
         hash_update(edges_sorted)
-        # we don't hash polys directly, but since we hash the loops, that's already in there implicitly
-
+        hash_update(edges_sharp_sorted)
+        hash_update(materials_sorted)
 
     import hashlib
 
