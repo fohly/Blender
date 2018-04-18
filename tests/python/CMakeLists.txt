@@ -150,6 +150,61 @@ add_test(
 # IO TESTS
 
 # OBJ Import tests
+
+add_test(
+	NAME multitest0
+	COMMAND "$<TARGET_FILE:blender>" ${TEST_BLENDER_EXE_PARAMS}
+	--python ${CMAKE_CURRENT_LIST_DIR}/bl_test.py --
+	--run={'FINISHED'}&bpy.ops.import_scene.obj\(filepath='${TEST_SRC_DIR}/io_tests/obj/multitest0.obj'\)
+	--md5=e9e9207f2dd471c494c1fecfda381c23 --md5_method=SCENE
+	--write-blend=${TEST_OUT_DIR}/multitest0.blend
+)
+
+add_test(
+	NAME multitest1
+	COMMAND "$<TARGET_FILE:blender>" ${TEST_BLENDER_EXE_PARAMS}
+	--python ${CMAKE_CURRENT_LIST_DIR}/bl_test.py --
+	--run={'FINISHED'}&bpy.ops.import_scene.obj\(filepath='${TEST_SRC_DIR}/io_tests/obj/multitest1.obj'\)
+	--md5=e9e9207f2dd471c494c1fecfda381c23 --md5_method=SCENE
+	--write-blend=${TEST_OUT_DIR}/multitest1.blend
+)
+
+add_test(
+	NAME cubeuv1
+	COMMAND "$<TARGET_FILE:blender>" ${TEST_BLENDER_EXE_PARAMS}
+	--python ${CMAKE_CURRENT_LIST_DIR}/bl_test.py --
+	--run={'FINISHED'}&bpy.ops.import_scene.obj\(filepath='${TEST_SRC_DIR}/io_tests/obj/cube01.obj'\)
+	--md5=9ba104e7accf32b21e8c19f922fd38b1 --md5_method=SCENE
+	--write-blend=${TEST_OUT_DIR}/cubeuv1.blend
+)
+
+add_test(
+	NAME cubeuv2
+	COMMAND "$<TARGET_FILE:blender>" ${TEST_BLENDER_EXE_PARAMS}
+	--python ${CMAKE_CURRENT_LIST_DIR}/bl_test.py --
+	--run={'FINISHED'}&bpy.ops.import_scene.obj\(filepath='${TEST_SRC_DIR}/io_tests/obj/cube02.obj'\)
+	--md5=9ba104e7accf32b21e8c19f922fd38b1 --md5_method=SCENE
+	--write-blend=${TEST_OUT_DIR}/cubeuv2.blend
+)
+
+add_test(
+	NAME edges01
+	COMMAND "$<TARGET_FILE:blender>" ${TEST_BLENDER_EXE_PARAMS}
+	--python ${CMAKE_CURRENT_LIST_DIR}/bl_test.py --
+	--run={'FINISHED'}&bpy.ops.import_scene.obj\(filepath='${TEST_SRC_DIR}/io_tests/obj/edges01.obj'\)
+	--md5=d949c8343375fe6d17ede03ebff73a6a --md5_method=SCENE
+	--write-blend=${TEST_OUT_DIR}/edges01.blend
+)
+
+add_test(
+	NAME edges02
+	COMMAND "$<TARGET_FILE:blender>" ${TEST_BLENDER_EXE_PARAMS}
+	--python ${CMAKE_CURRENT_LIST_DIR}/bl_test.py --
+	--run={'FINISHED'}&bpy.ops.import_scene.obj\(filepath='${TEST_SRC_DIR}/io_tests/obj/edges02.obj'\)
+	--md5=d949c8343375fe6d17ede03ebff73a6a --md5_method=SCENE
+	--write-blend=${TEST_OUT_DIR}/edges02.blend
+)
+
 # disabled until updated & working
 if(FALSE)
 add_test(
@@ -283,6 +338,16 @@ add_test(
 
 
 # STL Import tests
+
+add_test(
+	NAME import_stl_unicorn
+	COMMAND "$<TARGET_FILE:blender>" ${TEST_BLENDER_EXE_PARAMS}
+	--python ${CMAKE_CURRENT_LIST_DIR}/bl_test.py --
+	--run={'FINISHED'}&bpy.ops.import_mesh.stl\(filepath='${TEST_SRC_DIR}/io_tests/stl/unicorn.stl'\)
+	--md5=0b6a87c5e57caa8585c1437eee94fedf --md5_method=SCENE
+	--write-blend=${TEST_OUT_DIR}/import_stl_unicorn.blend
+)
+
 # disabled until updated & working
 if(FALSE)
 add_test(
