@@ -180,6 +180,7 @@
 
 #include "BLO_writefile.h"
 #include "BLO_readfile.h"
+#include "BLO_runtime.h"
 #include "BLO_undofile.h"
 #include "BLO_blend_defs.h"
 
@@ -2824,6 +2825,10 @@ static void write_region(WriteData *wd, ARegion *ar, int spacetype)
 	writestruct(wd, DATA, ARegion, 1, ar);
 
 	if (ar->regiondata) {
+		if (ar->flag & RGN_FLAG_TEMP_REGIONDATA) {
+			return;
+		}
+
 		switch (spacetype) {
 			case SPACE_VIEW3D:
 				if (ar->regiontype == RGN_TYPE_WINDOW) {
@@ -4094,6 +4099,11 @@ bool BLO_write_file(
 	void     *path_list_backup = NULL;
 	const int path_list_flag = (BKE_BPATH_TRAVERSE_SKIP_LIBRARY | BKE_BPATH_TRAVERSE_SKIP_MULTIFILE);
 
+	if (G.debug & G_DEBUG_IO && mainvar->lock != NULL) {
+		BKE_report(reports, RPT_INFO, "Checking sanity of current .blend file *BEFORE* save to disk.");
+		BLO_main_validate_libraries(mainvar, reports);
+	}
+
 	/* open temporary file, so we preserve the original in case we crash */
 	BLI_snprintf(tempname, sizeof(tempname), "%s@", filepath);
 
@@ -4134,15 +4144,15 @@ bool BLO_write_file(
 			if (G.relbase_valid) {
 				/* blend may not have been saved before. Tn this case
 				 * we should not have any relative paths, but if there
-				 * is somehow, an invalid or empty G.main->name it will
+				 * is somehow, an invalid or empty G_MAIN->name it will
 				 * print an error, don't try make the absolute in this case. */
-				BKE_bpath_absolute_convert(mainvar, G.main->name, NULL);
+				BKE_bpath_absolute_convert(mainvar, BKE_main_blendfile_path_from_global(), NULL);
 			}
 		}
 	}
 
 	if (write_flags & G_FILE_RELATIVE_REMAP) {
-		/* note, making relative to something OTHER then G.main->name */
+		/* note, making relative to something OTHER then G_MAIN->name */
 		BKE_bpath_relative_convert(mainvar, filepath, NULL);
 	}
 
@@ -4176,6 +4186,11 @@ bool BLO_write_file(
 	if (BLI_rename(tempname, filepath) != 0) {
 		BKE_report(reports, RPT_ERROR, "Cannot change old file (file saved with @)");
 		return 0;
+	}
+
+	if (G.debug & G_DEBUG_IO && mainvar->lock != NULL) {
+		BKE_report(reports, RPT_INFO, "Checking sanity of current .blend file *AFTER* save to disk.");
+		BLO_main_validate_libraries(mainvar, reports);
 	}
 
 	return 1;
